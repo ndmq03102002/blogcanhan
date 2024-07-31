@@ -1,0 +1,92 @@
+<?php
+// app/Http/Controllers/PostController.php
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\Category;
+use App\Models\Post;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
+use App\Services\Interfaces\PostServiceInterface as PostService;
+class PostController extends Controller
+{
+    protected  $postService;
+    public function __construct(PostService $postService)
+    {
+        $this->postService = $postService;
+    }
+    public function index()
+    {
+        $posts = Post::with('categories')->paginate(5);
+        $cats = Category::with('children')->defaultOrder()->get();
+        $config['seo'] = config('apps.post');
+        $config['method'] = 'index';
+        $template = 'post.index';
+        return view('dashboard.layout', compact(
+            'template',
+            'config',
+            'posts',
+            'cats',
+        ));
+    }
+    public function search(Request $request){
+        // Lấy các tham số từ request
+        $posts = Post::with('categories')->paginate(5);
+        $keyword = $request->input('keyword');
+        $catId = $request->input('parent_id');
+        $perPage = $request->input('perpage');
+        $rootCategories = Category::whereNull('parent_id')->get();
+        $cats = Category::with('children')->defaultOrder()->get();
+        // Gọi phương thức filter từ service
+        $categories = $this->postService->filter($keyword, $catId, $perPage);
+        $config['seo'] = config('apps.post');
+        $template = "post.index";  
+        return view("dashboard.layout", compact("template", "config","categories","cats","rootCategories" ,"keyword", "catId", "perPage","posts"));
+    }
+    public function create()
+    {
+        $posts = Post::all();
+        $categories = Category::all();
+        $config['seo'] = config('apps.post');
+        $config['method'] = 'create';
+        $template = 'post.store';
+        return view('dashboard.layout', compact(
+            'template',
+            'config',
+            'posts',
+            'categories',
+        ));
+    }
+
+    public function store(Request $request, $id = null)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'content' => 'required|string',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'category_id' => 'nullable|array',
+        ]);
+
+        // Xử lý ảnh đại diện nếu có
+        if ($request->hasFile('image')) {
+            $image = $request->file('image')->store('public/images');
+            $imageUrl = Storage::url($image);
+        } else {
+            $imageUrl = null;
+        }
+
+        // Tạo bài viết mới
+        $post = Post::create([
+            'title' => $request->input('title'),
+            'content' => $request->input('content'),
+            'image' => $imageUrl, // Lưu đường dẫn ảnh vào cột image
+            'user_id' => Auth::user()->id,
+        ]);
+
+        // Gán danh mục cho bài viết
+        $post->categories()->sync($request->input('category_id', []));
+
+        return redirect()->route('post.create')->with('success', 'Thêm bài viết thành công');
+    }
+}
